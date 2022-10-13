@@ -22,7 +22,7 @@ extern "C"
 
 using namespace std;
 using namespace cv;
-class opencv_demo
+gitclass opencv_demo
 {
 private:
      apriltag_family_t  *tf = nullptr;
@@ -57,12 +57,18 @@ Mat opencv_demo:: draw_marker(Mat input_frame, Mat Colour)
             line(Colour, Point(det->p[0][0], det->p[0][1]),
                      Point(det->p[3][0], det->p[3][1]),
                      Scalar(0, 0, 0xff), 2);
-            line(Colour, Point(det->p[1][0], det->p[1][1]),
-                     Point(det->p[2][0], det->p[2][1]),
-                     Scalar(0xff, 0, 0), 2);
-            line(Colour, Point(det->p[2][0], det->p[2][1]),
-                     Point(det->p[3][0], det->p[3][1]),
-                     Scalar(0xff, 0, 0), 2);
+        if (det->id==23)
+           {
+                   
+            cout<< det->p[0][0]<<"\t"<<det->p[1][0]<<"\t"<<det->p[2][0]<<"\t"<<det->p[3][0]<<"\t";
+            cout<< det->p[0][1]<<"\t"<<det->p[1][1]<<"\t"<<det->p[2][1]<<"\t"<<det->p[3][1]<<"\n";
+           }
+            // line(Colour, Point(det->p[1][0], det->p[1][1]),
+            //          Point(det->p[2][0], det->p[2][1]),
+            //          Scalar(0xff, 0, 0), 2);
+            // line(Colour, Point(det->p[2][0], det->p[2][1]),
+            //          Point(det->p[3][0], det->p[3][1]),
+            //          Scalar(0xff, 0, 0), 2);
 
             stringstream ss;
             ss << det->id;
@@ -81,7 +87,7 @@ Mat opencv_demo:: draw_marker(Mat input_frame, Mat Colour)
 }
 opencv_demo::opencv_demo(/* args */)
 {
-    this->tf = tag25h9_create();
+    this->tf = tag36h11_create();
     tf->width_at_border = 8;
     tf->total_width = 10;
     tf->reversed_border = false;
@@ -94,7 +100,7 @@ opencv_demo::opencv_demo(/* args */)
 
 opencv_demo::~opencv_demo()
 {
-    tag25h9_destroy(tf);
+    tag36h11_destroy(tf);
 }
 
 #include <time.h>
