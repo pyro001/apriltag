@@ -11,7 +11,7 @@ TARGETS := apriltag_demo  base_demo
 .PHONY: all
 all: apriltag_demo  base_demo
 
-apriltag_demo: apriltag_demo.o ../libapriltag.a
+apriltag_demo: apriltag_demo.o ../Src/libapriltag.a
 	@echo "   [$@]"
 	@$(CC) -o $@ $^ $(LDFLAGS)
 
@@ -19,7 +19,7 @@ apriltag_demo: apriltag_demo.o ../libapriltag.a
 # 	@echo "   [$@]"
 # 	@$(CXX) -o $@ $^ $(LDFLAGS) `pkg-config --libs opencv4`
 
-base_demo: base_demo.o ../libapriltag.a
+base_demo: base_demo.o ../Src/libapriltag.a
 	@echo "   [$@]"
 	@$(CXX) -o $@ $^ $(LDFLAGS) `pkg-config --libs opencv4`
 %.o: %.c

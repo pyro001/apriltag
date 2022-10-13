@@ -14,7 +14,7 @@ TARGETS := libapriltag.a libapriltag.so
 
 .PHONY: all
 all: $(TARGETS)
-	@$(MAKE) -C example all
+	@$(MAKE) -C ../example all
 
 .PHONY: install
 install: libapriltag.so
