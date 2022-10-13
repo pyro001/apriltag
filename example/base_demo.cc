@@ -1,28 +1,59 @@
 #include <iostream>
 #include <iomanip>
-#include <opencv4/opencv2/opencv_modules.hpp>
-#include<opencv4/opencv2/opencv.hpp>
-#include<opencv4/opencv2/videoio.hpp>
+#include <vector>
+#include "Src/opencv4/opencv2/opencv_modules.hpp"
+#include"Src/opencv4/opencv2/opencv.hpp"
+#include"Src/opencv4/opencv2/videoio.hpp"
 
 
+
+struct marker_bounds
+{
+  /* data */
+  float bound_1=0;
+  float bound_2=0;
+  float bound_3=0;
+  float bound_4=0;
+};
 extern "C" 
 {
-#include "apriltag.h"
-#include "tag36h11.h"
-#include "tag25h9.h"
+#include "Src/apriltag.h"
+#include "Src/tag36h11.h"
+#include "Src/tag25h9.h"
 // #include "Tag25h7.h"
-#include "tag16h5.h"
-#include "tagCircle21h7.h"
-#include "tagCircle49h12.h"
-#include "tagCustom48h12.h"
-#include "tagStandard41h12.h"
-#include "tagStandard52h13.h"
-#include "common/getopt.h"
+#include "Src/tag16h5.h"
+#include "Src/tagCircle21h7.h"
+#include "Src/tagCircle49h12.h"
+#include "Src/tagCustom48h12.h"
+#include "Src/tagStandard41h12.h"
+#include "Src/tagStandard52h13.h"
+#include "Src/common/getopt.h"
 }
 
 using namespace std;
 using namespace cv;
-gitclass opencv_demo
+class marker_pointcloud
+{
+private:
+
+
+vector<marker_bounds> vector_point_cloud;
+
+  /* data */
+public:
+  marker_pointcloud(/* args */);
+  ~marker_pointcloud();
+};
+
+marker_pointcloud::marker_pointcloud(/* args */)
+{
+}
+
+marker_pointcloud::~marker_pointcloud()
+{
+}
+
+class opencv_demo
 {
 private:
      apriltag_family_t  *tf = nullptr;
@@ -34,6 +65,9 @@ public:
     opencv_demo(/* args */);
     ~opencv_demo();
     Mat draw_marker(Mat input_frame, Mat Colour);
+    /// @brief generates data for the april grid point cloud
+    /// @return point could of a struct of the type 
+    marker_pointcloud get_bounds(); 
     
 };
 Mat opencv_demo:: draw_marker(Mat input_frame, Mat Colour)
