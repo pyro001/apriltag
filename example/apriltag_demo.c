@@ -51,10 +51,10 @@ either expressed or implied, of the Regents of The University of Michigan.
 #include "Src/tagStandard41h12.h"
 #include "Src/tagStandard52h13.h"
 
-#include "common/getopt.h"
-#include "common/image_u8.h"
-#include "common/pjpeg.h"
-#include "common/zarray.h"
+#include "Src/common/getopt.h"
+#include "Src/common/image_u8.h"
+#include "Src/common/pjpeg.h"
+#include "Src/common/zarray.h"
 
 #define  HAMM_HIST_MAX 10
 

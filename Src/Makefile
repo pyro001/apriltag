@@ -38,4 +38,4 @@ libapriltag.so: $(APRILTAG_OBJS)
 .PHONY: clean
 clean:
 	@rm -rf *.o common/*.o $(TARGETS)
-	@$(MAKE) -C example clean
+	@$(MAKE) -C ../example clean
