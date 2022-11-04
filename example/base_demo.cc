@@ -1,23 +1,14 @@
-#include "Src/opencv4/opencv2/opencv.hpp"
 #include "Src/opencv4/opencv2/opencv_modules.hpp"
 #include "Src/opencv4/opencv2/videoio.hpp"
+#include <Src/opencv4/opencv2/opencv.hpp>
+
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
 #define APRILGRIDARRAYSIZE 36
 #define DEBUG
-struct marker_bounds {
-  /* data */
-  float bound_1x = 0;
-  float bound_2x = 0;
-  float bound_3x = 0;
-  float bound_4x = 0;
-  float bound_1y = 0;
-  float bound_2y = 0;
-  float bound_3y = 0;
-  float bound_4y = 0;
-  int id = 0;
-};
+
 extern "C" {
 #include "Src/apriltag.h"
 #include "Src/tag25h9.h"
@@ -32,22 +23,69 @@ extern "C" {
 #include "Src/tagStandard52h13.h"
 }
 
+struct point {
+  float x = 0;
+  float y = 0;
+};
+
+struct marker_bounds {
+  /* data */
+  point bound_1;
+  point bound_2;
+  point bound_3;
+  point bound_4;
+
+  int id = 0;
+};
+
 using namespace std;
+
 using namespace cv;
 class marker_pointcloud {
 private:
-  std::vector<marker_bounds> *vector_point_cloud;
-  int* set_id;
+  int set_id;
+  std::vector<marker_bounds> instance_vector;
+  struct acquisition_instance_Str
+  {
+    vector<marker_bounds> vectore_acq;
+    int id;
 
+    /* data */
+  };
+  
+  std::vector<marker_bounds> vector_detection_set;
   /* data */
 public:
-  marker_pointcloud(/* args */);
+  marker_pointcloud();
   ~marker_pointcloud();
+  void create_detect_instance(vector<marker_bounds> input_vector);
+  void create_acquisition_instance(vector<marker_bounds> input_vector);
+  int get_set_id() { return set_id; }
 };
+void marker_pointcloud::create_acquisition_instance(
+    vector<marker_bounds> input_vector)
 
-marker_pointcloud::marker_pointcloud(/* args */) 
 {
-  set_id= nullptr;
+  this->instance_vector = input_vector;
+  this->set_id++;
+  // TODO:  you may add filters here to determine stuff currently left blank
+  acquisition_instance_Str acq;
+  acq.id=this->set_id;
+  acq.vectore_acq=instance_vector;
+  #ifdef DEBUGV
+    cout << "hello";
+    cout << "opset" << this->instance_vector.size();
+  #endif
+  this->create_acquisition_instance(acq);
+}
+void marker_pointcloud::create_acquisition_instance(acquisition_instance_Str acq)
+{
+  this->vector_detection_set
+ 
+}
+marker_pointcloud::marker_pointcloud() {
+  cout << "ctor created";
+  this->set_id = 0;
 }
 
 marker_pointcloud::~marker_pointcloud() {}
@@ -58,18 +96,19 @@ private:
   apriltag_detector_t *td = nullptr;
   apriltag_detection_t *det = nullptr;
   //  this->td = apriltag_detector_create();
+  marker_pointcloud detection_input;
 
 public:
   opencv_demo(/* args */);
   ~opencv_demo();
   Mat draw_marker(Mat input_frame, Mat Colour);
+  bool set_complete = false;
   /// @brief generates data for the april grid point cloud
   /// @return labelled image or return a matrix of zeros if not available
-  marker_pointcloud get_bounds();
-  marker_pointcloud set_bounds(marker_bounds input_tagset);
 };
 Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour) {
   auto gray = input_frame;
+  vector<marker_bounds> local_store;
   // Make an image_u8_t header for the Mat data
   image_u8_t im = {.width = gray.cols,
                    .height = gray.rows,
@@ -86,16 +125,18 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour) {
            Point(det->p[1][0], det->p[1][1]), Scalar(0, 0xff, 0), 2);
       line(Colour, Point(det->p[0][0], det->p[0][1]),
            Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
-      marker_bounds *marker;
-      marker->id= det->id;
-      marker->bound_1x=det->p[0][0];
-      marker->bound_2x=det->p[1][0];
-      marker->bound_3x=det->p[2][0];
-      marker->bound_4x=det->p[3][0];
-      marker->bound_1y=det->p[0][1];
-      marker->bound_2y=det->p[1][1];
-      marker->bound_3y=det->p[2][1];
-      marker->bound_4y=det->p[3][1];
+      marker_bounds marker;
+      marker.id = det->id;
+      marker.bound_1.x = det->p[1][0];
+      marker.bound_2.x = det->p[2][0];
+      marker.bound_3.x = det->p[3][0];
+      marker.bound_4.x = det->p[4][0];
+      marker.bound_1.y = det->p[1][1];
+      marker.bound_2.y = det->p[2][1];
+      marker.bound_3.y = det->p[3][1];
+      marker.bound_4.y = det->p[4][1];
+      local_store.push_back(marker);
+#ifdef DEBUGV
 
       if (det->id == 23) {
 
@@ -104,13 +145,13 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour) {
         cout << det->p[0][1] << "\t" << det->p[1][1] << "\t" << det->p[2][1]
              << "\t" << det->p[3][1] << "\n";
       }
-      // line(Colour, Point(det->p[1][0], det->p[1][1]),
-      //          Point(det->p[2][0], det->p[2][1]),
-      //          Scalar(0xff, 0, 0), 2);
-      // line(Colour, Point(det->p[2][0], det->p[2][1]),
-      //          Point(det->p[3][0], det->p[3][1]),
-      //          Scalar(0xff, 0, 0), 2);
-
+// line(Colour, Point(det->p[1][0], det->p[1][1]),
+//          Point(det->p[2][0], det->p[2][1]),
+//          Scalar(0xff, 0, 0), 2);
+// line(Colour, Point(det->p[2][0], det->p[2][1]),
+//          Point(det->p[3][0], det->p[3][1]),
+//          Scalar(0xff, 0, 0), 2);
+#endif
       stringstream ss;
       ss << det->id;
       String text = ss.str();
@@ -123,19 +164,25 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour) {
                     det->c[1] + textsize.height / 2),
               fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
     }
+    this->detection_input.create_acquisition_instance(local_store);
     apriltag_detections_destroy(detections);
-    return Colour;
+   
+    int set_num = this->detection_input.get_set_id();
+    cout<<"\n"<<set_num;
+    if (set_num>= 100)
+      this->set_complete= true;
 
+   return Colour;
   }
 
-  else
-  {
+  else {
 #ifndef DEBUG
     return cv::Mat::zeros(Colour.size(), Colour.type());
 #else
     return Colour;
 #endif
-}}
+  }
+}
 opencv_demo::opencv_demo(/* args */) {
   this->tf = tag36h11_create();
   tf->width_at_border = 8;
@@ -200,6 +247,8 @@ int main(int argc, char **argv) {
     time(&end);
 
     imshow("Tag Detections", frame);
+    if (aprilgrid.set_complete)
+      break;
     // Press  ESC on keyboard to  exit
     char c = (char)waitKey(1);
     if (c == 27)
