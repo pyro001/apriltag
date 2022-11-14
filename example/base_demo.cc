@@ -1,6 +1,6 @@
-#include "Src/opencv4/opencv2/opencv_modules.hpp"
-#include "Src/opencv4/opencv2/videoio.hpp"
-#include <Src/opencv4/opencv2/opencv.hpp>
+#include <opencv4/opencv2/opencv_modules.hpp>
+#include <opencv4/opencv2/videoio.hpp>
+#include <opencv4/opencv2/opencv.hpp>
 
 #include <cstdlib>
 #include <iomanip>
@@ -22,7 +22,7 @@ extern "C" {
 #include "Src/tagStandard41h12.h"
 #include "Src/tagStandard52h13.h"
 }
-
+using namespace std;
 struct point {
   float x = 0;
   float y = 0;
@@ -38,49 +38,50 @@ struct marker_bounds {
   int id = 0;
 };
 
-using namespace std;
+  struct acquisition_instance_Str
+  {
+    std::vector<marker_bounds> vector_acq;
+    int id;
+
+    /* data */
+  };
 
 using namespace cv;
 class marker_pointcloud {
 private:
   int set_id;
   std::vector<marker_bounds> instance_vector;
-  struct acquisition_instance_Str
-  {
-    vector<marker_bounds> vectore_acq;
-    int id;
 
-    /* data */
-  };
-  
-  std::vector<marker_bounds> vector_detection_set;
+  const int max_iter=3;
+  std::vector<acquisition_instance_Str> vector_detection_set;
   /* data */
 public:
+
   marker_pointcloud();
   ~marker_pointcloud();
-  void create_detect_instance(vector<marker_bounds> input_vector);
-  void create_acquisition_instance(vector<marker_bounds> input_vector);
+  void create_acquisition_instance(acquisition_instance_Str input_vector);
+  void create_detect_instance(std::vector<marker_bounds> input_vector);
   int get_set_id() { return set_id; }
 };
-void marker_pointcloud::create_acquisition_instance(
-    vector<marker_bounds> input_vector)
+void marker_pointcloud::create_detect_instance(
+    std::vector<marker_bounds> input_vector)
 
 {
   this->instance_vector = input_vector;
   this->set_id++;
   // TODO:  you may add filters here to determine stuff currently left blank
   acquisition_instance_Str acq;
-  acq.id=this->set_id;
-  acq.vectore_acq=instance_vector;
+  acq.id= set_id;
+  acq.vector_acq=instance_vector;
   #ifdef DEBUGV
     cout << "hello";
     cout << "opset" << this->instance_vector.size();
   #endif
-  this->create_acquisition_instance(acq);
+  create_acquisition_instance(acq);
 }
-void marker_pointcloud::create_acquisition_instance(acquisition_instance_Str acq)
+void marker_pointcloud::create_acquisition_instance(acquisition_instance_Str input_vector)
 {
-  this->vector_detection_set
+this->vector_detection_set.emplace_back(input_vector);
  
 }
 marker_pointcloud::marker_pointcloud() {
@@ -164,7 +165,7 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour) {
                     det->c[1] + textsize.height / 2),
               fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
     }
-    this->detection_input.create_acquisition_instance(local_store);
+    this->detection_input.create_detect_instance(local_store);
     apriltag_detections_destroy(detections);
    
     int set_num = this->detection_input.get_set_id();
