@@ -1,15 +1,24 @@
+#include <opencv4/opencv2/opencv.hpp>
 #include <opencv4/opencv2/opencv_modules.hpp>
 #include <opencv4/opencv2/videoio.hpp>
-#include <opencv4/opencv2/opencv.hpp>
+#include <opencv4/opencv2/calib3d/calib3d.hpp>
+#include <opencv4/opencv2/core/core.hpp>
+#include <opencv4/opencv2/highgui/highgui.hpp>
+#include <opencv4/opencv2/imgproc/imgproc.hpp>
+#include <stdio.h>
+#include <iostream>
 
+#include <sys/stat.h>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
 #define APRILGRIDARRAYSIZE 36
 #define DEBUG
+#define RESOLUTIONMOD 10
 
-extern "C" {
+extern "C"
+{
 #include "Src/apriltag.h"
 #include "Src/tag25h9.h"
 #include "Src/tag36h11.h"
@@ -31,6 +40,7 @@ struct point
 {
   float x = 0;
   float y = 0;
+  cv::Point2f pt2D = cv::Point2f(this->x, this->y);
   bool operator==(const point &comparator)
 
   {
@@ -89,6 +99,7 @@ public:
   bool motion_filter(marker_bounds input);
   void create_acquisition_instance(acquisition_instance_Str input_vector);
   void create_detect_instance(std::vector<marker_bounds> input_vector);
+  void setup_calibration(float square_size, float space_size, cv::Mat img);
   int get_set_id() { return set_id; }
 };
 // ===================================================
@@ -100,7 +111,7 @@ void marker_pointcloud::create_detect_instance(
 {
   this->instance_vector = input_vector;
   marker_bounds manifold = input_vector.front(); // this is sorted by ids get id 2 bound1 and pass to motion filter
-  point ptmanifold = manifold.bound_1;
+
 #ifdef DEBUGV
   cout << "input control motion filter:" << ptmanifold.x << "\t::\t" << ptmanifold.y;
 #endif
@@ -109,6 +120,7 @@ void marker_pointcloud::create_detect_instance(
   if (new_image_found)
   {
     this->set_id++;
+    cout << "\n batch number" << this->set_id;
     acquisition_instance_Str acq;
     acq.id = set_id;
     acq.vector_acq = instance_vector;
@@ -164,6 +176,69 @@ bool marker_pointcloud::motion_filter(marker_bounds input)
   }
   return (true);
 }
+
+void marker_pointcloud::setup_calibration(float square_size, float space_size, cv::Mat img)
+{
+  vector<vector<Point3f>> object_points;
+  vector<vector<Point2f>> image_points;
+  cv::Mat K;
+  cv::Mat D;
+  vector<Mat> rvecs, tvecs;
+  int flag = 0;
+  flag |= cv::CALIB_FIX_K4;
+
+  flag |= cv::CALIB_FIX_K5;
+  for (std::vector<acquisition_instance_Str>::iterator
+           it = this->vector_detection_set.begin();
+       it != this->vector_detection_set.end(); ++it)
+  {
+    vector<cv::Point2f> image_point;
+    vector<Point3f> object_point;
+
+    point pt_ref;
+    std::vector<marker_bounds> detection_stub = it->vector_acq;
+    for (std::vector<marker_bounds>::iterator
+             it2 = detection_stub.begin();
+         it2 != detection_stub.end(); ++it2)
+    {
+      //  cout<< "\n"<<it2->id<<"for id"<<pt_ref.x<<"::"<<pt_ref.y<<"\n";
+
+      image_point.push_back(cv::Point2f(it2->bound_1.x, it2->bound_1.y));
+      object_point.push_back(cv::Point3f(pt_ref.x, 0, 0));
+      image_point.push_back(cv::Point2f(it2->bound_2.x, it2->bound_2.y));
+
+      object_point.push_back(cv::Point3f(pt_ref.x, pt_ref.y + 0.0254, 0));
+
+      image_point.push_back(cv::Point2f(it2->bound_3.x, it2->bound_3.y));
+
+      object_point.push_back(cv::Point3f(pt_ref.x + 0.0254, 0, 0));
+
+      image_point.push_back(cv::Point2f(it2->bound_4.x, it2->bound_4.y));
+
+      object_point.push_back(cv::Point3f(pt_ref.x + 0.0254, pt_ref.y + 0.0254, 0));
+      pt_ref.x = pt_ref.x + 0.0254 + 0.0063;
+      if (pt_ref.x >= ((0.0254 + 0.0063) * 6) - 0.0254)
+      {
+        cout << "\n"
+             << it2->id << "for id" << pt_ref.x << "::" << pt_ref.y << "\n";
+        pt_ref.y = pt_ref.y + 0.0254 + 0.0063;
+        pt_ref.x = 0;
+      }
+    }
+    image_points.push_back(image_point);
+    object_points.push_back(object_point);
+    cout << "\nshapes og n vectors " << object_point.size() << "\t\t" << image_point.size();
+
+    // cout << "\nshapes " << object_points.size() << "\t\t" << image_points.size();
+    cout << "callibration opencv";
+    cv::calibrateCamera(object_points, image_points, img.size(), K, D, rvecs, tvecs, flag);
+    FileStorage fs("out_file.yaml", FileStorage::WRITE);
+    fs << "K" << K;
+    fs << "D" << D;
+    fs << "square_size" << square_size;
+    printf("Done Calibration\n");
+  }
+}
 // ===================================================
 //  opencv aprilgrid extraction
 //====================================================
@@ -194,6 +269,7 @@ public:
 Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
 {
   auto gray = input_frame;
+  // cout<< "\n input_frame size"<< Colour.size();
   vector<marker_bounds> local_store;
   // Make an image_u8_t header for the Mat data
   image_u8_t im = {.width = gray.cols,
@@ -208,16 +284,17 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
   cout << "/\ndetected\t\t:::\t\t" << zarray_size(detections);
 #endif
 
-  if (zarray_size(detections) >= APRILGRIDARRAYSIZE)
+  if (zarray_size(detections) == APRILGRIDARRAYSIZE)
   {
     for (int i = 0; i < zarray_size(detections); i++)
     {
       apriltag_detection_t *det;
       zarray_get(detections, i, &det);
-      line(Colour, Point(det->p[0][0], det->p[0][1]),
-           Point(det->p[1][0], det->p[1][1]), Scalar(0, 0xff, 0), 2);
-      line(Colour, Point(det->p[0][0], det->p[0][1]),
-           Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
+      // line(Colour, Point(det->p[0][0], det->p[0][1]),
+      //      Point(det->p[1][0], det->p[1][1]), Scalar(0, 0xff, 0), 2);
+      // line(Colour, Point(det->p[0][0], det->p[0][1]),
+      //      Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
+
       marker_bounds marker;
       marker.id = det->id;
       marker.bound_1.x = det->p[0][0];
@@ -230,21 +307,21 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
       marker.bound_4.y = det->p[3][1];
       local_store.push_back(marker);
 #ifdef DEBUGV
-
       if (det->id == 2)
       {
-
-        cout << det->p[0][0] << "\t" << det->p[1][0] << "\t" << det->p[2][0]
-             << "\t" << det->p[3][0] << "\t";
-        cout << det->p[0][1] << "\t" << det->p[1][1] << "\t" << det->p[2][1]
-             << "\t" << det->p[3][1] << "\n";
+        cout << "\npt1\t" << det->p[0][0] << "\t::\t" << det->p[0][1] << "\npt2\t" << det->p[1][0]
+             << "\t::\t" << det->p[1][1] << "\t";
+        cout << "\npt3\t" << det->p[2][0] << "\t::\t" << det->p[2][1] << "\npt4\t" << det->p[3][0]
+             << "\t::\t" << det->p[3][1] << "\n";
+        line(Colour, Point(det->p[0][0], det->p[0][1]),
+             Point(det->p[1][0], det->p[1][1]),
+             Scalar(0xff, 0, 0), 2);
+        line(Colour, Point(det->p[0][0], det->p[0][1]),
+             Point(det->p[3][0], det->p[3][1]),
+             Scalar(0x00, 0xff, 0), 2);
+        line(Colour, Point(det->p[2][0], det->p[2][1]),
+             Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
       }
-// line(Colour, Point(det->p[1][0], det->p[1][1]),
-//          Point(det->p[2][0], det->p[2][1]),
-//          Scalar(0xff, 0, 0), 2);
-// line(Colour, Point(det->p[2][0], det->p[2][1]),
-//          Point(det->p[3][0], det->p[3][1]),
-//          Scalar(0xff, 0, 0), 2);
 #endif
       stringstream ss;
       ss << det->id;
@@ -259,14 +336,17 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
               fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
     }
     this->detection_input.create_detect_instance(local_store);
+
     apriltag_detections_destroy(detections);
 
     int set_num = this->detection_input.get_set_id();
-    cout << "\n"
-         << set_num;
-    if (set_num >= 10)
-      this->set_complete = true;
 
+    if (set_num >= this->max_iter)
+    {
+      this->set_complete = true;
+      cout << "calibration criteria met. running calibration...";
+      this->detection_input.setup_calibration(2, 2, input_frame);
+    }
     return Colour;
   }
 
