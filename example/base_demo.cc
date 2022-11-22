@@ -7,7 +7,7 @@
 #include <opencv4/opencv2/imgproc/imgproc.hpp>
 #include <stdio.h>
 #include <iostream>
-
+#include <eigen3/Eigen/Core>
 #include <sys/stat.h>
 #include <cstdlib>
 #include <iomanip>
@@ -15,8 +15,9 @@
 #include <vector>
 #define APRILGRIDARRAYSIZE 36
 #define DEBUG
-#define RESOLUTIONMOD 10
-
+#define RESOLUTIONMOD 1
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include <pthread.h>
 extern "C"
 {
 #include "Src/apriltag.h"
@@ -58,7 +59,7 @@ struct marker_bounds
   point bound_2;
   point bound_3;
   point bound_4;
-
+  point centre;
   int id = 0;
   bool operator==(const marker_bounds &comparator)
   {
@@ -87,8 +88,15 @@ class marker_pointcloud
 private:
   int set_id;
   std::vector<marker_bounds> instance_vector;
+  float squaresize = (25.55 / 1000);
+  float margin = (06.8 / 1000);
+  double computeReprojectionErrors(const vector<vector<cv::Point3f>> &objectPoints,
+                                   const vector<vector<cv::Point2f>> &imagePoints,
+                                   const vector<cv::Mat> &rvecs, const vector<cv::Mat> &tvecs,
+                                   const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs);
 
   const int max_iter = 3;
+
   std::vector<acquisition_instance_Str> vector_detection_set;
   /* data */
 public:
@@ -176,14 +184,45 @@ bool marker_pointcloud::motion_filter(marker_bounds input)
   }
   return (true);
 }
+double marker_pointcloud::computeReprojectionErrors(const vector<vector<cv::Point3f>> &objectPoints,
+                                                    const vector<vector<cv::Point2f>> &imagePoints,
+                                                    const vector<cv::Mat> &rvecs, const vector<cv::Mat> &tvecs,
+                                                    const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs)
+{
+  vector<Point2f> imagePoints2;
+  int i;
+  double totalErr = 0, err;
+  vector<float> perViewErrors;
+  perViewErrors.resize(objectPoints.size());
 
+  for (i = 0; i < (int)objectPoints.size(); ++i)
+  {
+    projectPoints(cv::Mat(objectPoints[i]), rvecs[i], tvecs[i], cameraMatrix,
+                  distCoeffs, imagePoints2);
+    err = cv::norm(cv::Mat(imagePoints[i]), cv::Mat(imagePoints2), cv::NORM_L2);
+
+    int n = (int)objectPoints[i].size();
+
+    // cout << err << "\nerror" << err / n << "round id" << i << "size of objective" << n << "\n";
+    // perViewErrors[i] = (float)std::sqrt(err / n);
+    totalErr += err / n;
+    // totalPoints += n;
+  }
+  cout << "total poincould size " << (int)objectPoints.size() << "\tmean error " << totalErr / (int)objectPoints.size() << "\n";
+
+  return (totalErr / (int)objectPoints.size());
+}
 void marker_pointcloud::setup_calibration(float square_size, float space_size, cv::Mat img)
 {
   vector<vector<Point3f>> object_points;
   vector<vector<Point2f>> image_points;
+  vector<vector<Point3f>> object_points2;
+  vector<vector<Point2f>> image_points2;
   cv::Mat K;
   cv::Mat D;
-  vector<Mat> rvecs, tvecs;
+  cv::Mat K2;
+  cv::Mat D2;
+  vector<Mat> rvecs, tvecs, rvecs2, tvecs2;
   int flag = 0;
   flag |= cv::CALIB_FIX_K4;
 
@@ -196,48 +235,109 @@ void marker_pointcloud::setup_calibration(float square_size, float space_size, c
     vector<Point3f> object_point;
 
     point pt_ref;
+    pt_ref.x = (this->squaresize + this->margin) * 6;
     std::vector<marker_bounds> detection_stub = it->vector_acq;
     for (std::vector<marker_bounds>::iterator
              it2 = detection_stub.begin();
          it2 != detection_stub.end(); ++it2)
     {
+      pt_ref.x = pt_ref.x - (this->squaresize + this->margin);
       //  cout<< "\n"<<it2->id<<"for id"<<pt_ref.x<<"::"<<pt_ref.y<<"\n";
+      if (pt_ref.x <= 0.00000001)
+        pt_ref.x = 0;
+      image_point.push_back(cv::Point2f(it2->bound_2.x, it2->bound_2.y));
+      // cout << "\n" << it2->id << "for id" << it2->bound_1.x << "::" << it2->bound_1.y << "\n";
+      object_point.push_back(cv::Point3f(pt_ref.x, pt_ref.y, 0));
+      // cout << "\n"<< it2->id << "for id" << pt_ref.x << "::" << "0" << "\n";
+      image_point.push_back(cv::Point2f(it2->bound_3.x, it2->bound_3.y));
+      // cout << "\n"<< it2->id << "for id" << it2->bound_1.x << "::" << it2->bound_1.y << "\n";
+      object_point.push_back(cv::Point3f(pt_ref.x, pt_ref.y + this->squaresize, 0));
+      // cout << cv::Point3f(pt_ref.x, pt_ref.y + this->squaresize, 0);
 
       image_point.push_back(cv::Point2f(it2->bound_1.x, it2->bound_1.y));
-      object_point.push_back(cv::Point3f(pt_ref.x, 0, 0));
-      image_point.push_back(cv::Point2f(it2->bound_2.x, it2->bound_2.y));
-
-      object_point.push_back(cv::Point3f(pt_ref.x, pt_ref.y + 0.0254, 0));
-
-      image_point.push_back(cv::Point2f(it2->bound_3.x, it2->bound_3.y));
-
-      object_point.push_back(cv::Point3f(pt_ref.x + 0.0254, 0, 0));
+      // cout << cv::Point2f(it2->bound_3.x, it2->bound_3.y);
+      // cout<<cv::Point3f(pt_ref.x + this->squaresize, 0, 0);
+      object_point.push_back(cv::Point3f(pt_ref.x + this->squaresize, pt_ref.y, 0));
 
       image_point.push_back(cv::Point2f(it2->bound_4.x, it2->bound_4.y));
 
-      object_point.push_back(cv::Point3f(pt_ref.x + 0.0254, pt_ref.y + 0.0254, 0));
-      pt_ref.x = pt_ref.x + 0.0254 + 0.0063;
-      if (pt_ref.x >= ((0.0254 + 0.0063) * 6) - 0.0254)
+      object_point.push_back(cv::Point3f(pt_ref.x + this->squaresize, pt_ref.y + this->squaresize, 0));
+      // cout << "\n"
+      //      << it2->id << "for id" << pt_ref.x << "::" << pt_ref.y << "\n";
+      // cout << "\n1:::\t" << (cv::Point2f(it2->bound_1.x, it2->bound_1.y)) << (cv::Point3f(pt_ref.x, pt_ref.y, 0)) << "\n4:::\t" << (cv::Point2f(it2->bound_4.x, it2->bound_4.y)) << (cv::Point3f(pt_ref.x, pt_ref.y + this->squaresize, 0));
+      // cout << "\n2:::\t" << (cv::Point2f(it2->bound_2.x, it2->bound_2.y)) << (cv::Point3f(pt_ref.x + this->squaresize, pt_ref.y, 0)) << "\n3:::\t" << (cv::Point2f(it2->bound_3.x, it2->bound_3.y)) << cv::Point3f(pt_ref.x + this->squaresize, pt_ref.y + this->squaresize, 0) << "\n";
+
+      // if (int(pt_ref.x/100000)==0)
+      // {
+      //   pt_ref.x = 0;
+      // }
+
+      // cout << "\n"
+      //      << it2->id << "for id" << pt_ref.x << "::" << this->margin<< "\n";
+      if (pt_ref.x <= 0)
       {
-        cout << "\n"
-             << it2->id << "for id" << pt_ref.x << "::" << pt_ref.y << "\n";
-        pt_ref.y = pt_ref.y + 0.0254 + 0.0063;
-        pt_ref.x = 0;
+
+        pt_ref.y = pt_ref.y + this->margin + this->squaresize;
+        pt_ref.x = (this->squaresize + this->margin) * 6;
       }
     }
     image_points.push_back(image_point);
     object_points.push_back(object_point);
-    cout << "\nshapes og n vectors " << object_point.size() << "\t\t" << image_point.size();
+    // cout << "\nshapes og n vectors " << object_point.size() << "\t\t" << image_point.size();
 
     // cout << "\nshapes " << object_points.size() << "\t\t" << image_points.size();
-    cout << "callibration opencv";
-    cv::calibrateCamera(object_points, image_points, img.size(), K, D, rvecs, tvecs, flag);
-    FileStorage fs("out_file.yaml", FileStorage::WRITE);
-    fs << "K" << K;
-    fs << "D" << D;
-    fs << "square_size" << square_size;
-    printf("Done Calibration\n");
   }
+
+  double reproj_error = cv::calibrateCamera(object_points, image_points, img.size(), K, D, rvecs, tvecs);
+  cout << "\nCalibration error: " << computeReprojectionErrors(object_points, image_points, rvecs, tvecs, K, D) << endl;
+
+  for (std::vector<acquisition_instance_Str>::iterator
+           it = this->vector_detection_set.begin();
+       it != this->vector_detection_set.end(); ++it)
+  {
+    vector<cv::Point2f> image_point2;
+    vector<Point3f> object_point2;
+
+    point pt_ref;
+    pt_ref.x = (this->squaresize + this->margin) * 6;
+    std::vector<marker_bounds> detection_stub = it->vector_acq;
+    for (std::vector<marker_bounds>::iterator
+             it2 = detection_stub.begin();
+         it2 != detection_stub.end(); ++it2)
+    {
+      pt_ref.x = pt_ref.x - (this->squaresize + this->margin);
+      //  cout<< "\n"<<it2->id<<"for id"<<pt_ref.x<<"::"<<pt_ref.y<<"\n";
+      if (pt_ref.x <= 0.00000001)
+        pt_ref.x = 0;
+
+      image_point2.push_back(cv::Point2f(it2->centre.x, it2->bound_1.y));
+      // cout << "\n" << it2->id << "for id" << it2->bound_1.x << "::" << it2->bound_1.y << "\n";
+      object_point2.push_back(cv::Point3f(pt_ref.x, pt_ref.y, 0));
+
+      if (pt_ref.x <= 0)
+      {
+
+        pt_ref.y = pt_ref.y + this->margin + this->squaresize;
+        pt_ref.x = (this->squaresize + this->margin) * 6;
+      }
+    }
+    image_points2.push_back(image_point2);
+    object_points2.push_back(object_point2);
+  }
+
+  double reproj_error2 = cv::calibrateCamera(object_points2, image_points2, img.size(), K2, D2, rvecs2, tvecs2);
+  cout << "\n Calibration error: " << computeReprojectionErrors(object_points2, image_points2, rvecs2, tvecs2, K2, D2) << endl;
+  FileStorage fs("out_file.yaml", FileStorage::WRITE);
+  fs << "square-size" << this->squaresize;
+  fs << "margin" << this->margin;
+  fs << "K" << K;
+  fs << "D" << D;
+  fs << "Reprojection error" << reproj_error;
+  fs << "K2 - centre" << K2;
+  fs << "D2 - centre" << D2;
+  fs << "Reprojection error - centre" << reproj_error2;
+
+  printf("Done Calibration\n");
 }
 // ===================================================
 //  opencv aprilgrid extraction
@@ -258,6 +358,7 @@ public:
   opencv_demo(int max_iterations);
   Mat draw_marker(Mat input_frame, Mat Colour);
   bool set_complete = false;
+  bool instance_complete = false;
 
   /// @brief generates data for the april grid point cloud
   /// @return labelled image or return a matrix of zeros if not available
@@ -286,6 +387,7 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
 
   if (zarray_size(detections) == APRILGRIDARRAYSIZE)
   {
+    this->instance_complete = true;
     for (int i = 0; i < zarray_size(detections); i++)
     {
       apriltag_detection_t *det;
@@ -301,26 +403,28 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
       marker.bound_2.x = det->p[1][0];
       marker.bound_3.x = det->p[2][0];
       marker.bound_4.x = det->p[3][0];
+      marker.centre.x = det->c[0];
       marker.bound_1.y = det->p[0][1];
       marker.bound_2.y = det->p[1][1];
       marker.bound_3.y = det->p[2][1];
       marker.bound_4.y = det->p[3][1];
+      marker.centre.y = det->c[1];
       local_store.push_back(marker);
-#ifdef DEBUGV
+#ifdef DEBUG
       if (det->id == 2)
       {
-        cout << "\npt1\t" << det->p[0][0] << "\t::\t" << det->p[0][1] << "\npt2\t" << det->p[1][0]
-             << "\t::\t" << det->p[1][1] << "\t";
-        cout << "\npt3\t" << det->p[2][0] << "\t::\t" << det->p[2][1] << "\npt4\t" << det->p[3][0]
-             << "\t::\t" << det->p[3][1] << "\n";
-        line(Colour, Point(det->p[0][0], det->p[0][1]),
-             Point(det->p[1][0], det->p[1][1]),
-             Scalar(0xff, 0, 0), 2);
+        // cout << "\npt1\t" << det->p[0][0] << "\t::\t" << det->p[0][1] << "\npt2\t" << det->p[1][0]
+        //      << "\t::\t" << det->p[1][1] << "\t";
+        // cout << "\npt3\t" << det->p[2][0] << "\t::\t" << det->p[2][1] << "\npt4\t" << det->p[3][0]
+        //      << "\t::\t" << det->p[3][1] << "\n";
+        // line(Colour, Point(det->p[0][0], det->p[0][1]),
+        //      Point(det->p[1][0], det->p[1][1]),
+        //      Scalar(0xff, 0, 0), 2);
         line(Colour, Point(det->p[0][0], det->p[0][1]),
              Point(det->p[3][0], det->p[3][1]),
              Scalar(0x00, 0xff, 0), 2);
-        line(Colour, Point(det->p[2][0], det->p[2][1]),
-             Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
+        // line(Colour, Point(det->p[2][0], det->p[2][1]),
+        //      Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
       }
 #endif
       stringstream ss;
@@ -361,7 +465,7 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour)
 }
 opencv_demo::opencv_demo(/* args */)
 {
-  this->max_iter = 10;
+  this->max_iter = 20;
   this->tf = tag36h11_create();
   tf->width_at_border = 8;
   tf->total_width = max_iter;
@@ -387,18 +491,19 @@ opencv_demo::~opencv_demo() { tag36h11_destroy(tf); }
 
 using namespace cv;
 using namespace std;
-opencv_demo aprilgrid;
+opencv_demo aprilgrid, aprilgrid2;
+
 int main(int argc, char **argv)
 {
-
   // Start default camera
+  cv::VideoCapture cap2(3);
   cv::VideoCapture cap(0);
 
   // cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps <<
   // endl;
 
   // Check if camera opened successfully
-  if (!cap.isOpened())
+  if (!cap.isOpened() || !cap2.isOpened())
   {
     cout << "Error opening video stream" << endl;
     return -1;
@@ -420,27 +525,48 @@ int main(int argc, char **argv)
   while (1)
   {
 
-    Mat frame, gray;
+    Mat frame, frame2, gray2, gray;
+    
+   
+    if (!aprilgrid.set_complete)
+    {
+      // cout << "cwebcam1";
+      cap >> frame;
+      // cv::flip(frame,frame,1);
+      cvtColor(frame, gray, COLOR_BGR2GRAY);
+      if (frame.empty())
+        break;
+      
+      frame = aprilgrid.draw_marker(gray, frame);
+      imshow("CAM0", frame);
+    }
+    if (!aprilgrid2.set_complete)
+    {
 
-    // Capture frame-by-frame
-    cap >> frame;
-    cvtColor(frame, gray, COLOR_BGR2GRAY);
+      // cout << "cwebcam2";
+      // Capture frame-by-frame
+      cap2 >> frame2;
+      // cv::flip(frame,frame,1);
+      cvtColor(frame2, gray2, COLOR_BGR2GRAY);
+     
+      // If the frame is empty, break immediately
 
-    frame_counter++;
-    // If the frame is empty, break immediately
-    if (frame.empty())
-      break;
+      if (frame2.empty())
+        break;
+      // Write the frame into the file 'outcpp.avi'
+      // cap.write(frame);
 
-    // Write the frame into the file 'outcpp.avi'
-    // cap.write(frame);
-    frame = aprilgrid.draw_marker(gray, frame);
-    // Display the resulting frame
-
+      frame2 = aprilgrid2.draw_marker(gray2, frame2);
+      imshow("CAM2", frame2);
+      // Display the resulting frame
+    }
     time(&end);
 
-    imshow("Tag Detections", frame);
-    if (aprilgrid.set_complete)
+    
+    
+    if (aprilgrid.set_complete && aprilgrid2.set_complete)
       break;
+
     // Press  ESC on keyboard to  exit
     char c = (char)waitKey(1);
     if (c == 27)
@@ -449,6 +575,7 @@ int main(int argc, char **argv)
 
   // When everything done, release the video capture and write object
   cap.release();
+  cap2.release();
   //   video.release();
 
   // Closes all the frames
