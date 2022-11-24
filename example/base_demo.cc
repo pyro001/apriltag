@@ -5,6 +5,7 @@
 #include <opencv4/opencv2/core/core.hpp>
 #include <opencv4/opencv2/highgui/highgui.hpp>
 #include <opencv4/opencv2/imgproc/imgproc.hpp>
+
 #include <stdio.h>
 #include <iostream>
 #include <eigen3/Eigen/Core>
@@ -489,45 +490,84 @@ opencv_demo::~opencv_demo() { tag36h11_destroy(tf); }
 //====================================================
 #include <time.h>
 
+bool killall = false;
 using namespace cv;
 using namespace std;
 opencv_demo aprilgrid, aprilgrid2;
 
+void *capturedata_aprilgrid(void *input)
+{
+  int in = *(int *)input;
+
+  cv::VideoCapture cap2(in);
+  Mat frame2, gray2;
+  while (!killall)
+  {
+    if (!aprilgrid2.set_complete)
+    {
+
+      // cout << "cwebcam2";
+      // Capture frame-by-frame
+
+      cap2 >> frame2;
+      // cv::flip(frame,frame,1);
+      cvtColor(frame2, gray2, COLOR_BGR2GRAY);
+
+      // If the frame is empty, break immediately
+
+      if (frame2.empty())
+        break;
+      // Write the frame into the file 'outcpp.avi'
+      // cap.write(frame);
+      string name_cam = "CAM2";
+      frame2 = aprilgrid2.draw_marker(gray2, frame2);
+      imshow(name_cam, frame2);
+      // Display the resulting frame
+    }
+    else
+    {
+      cap2.release();
+      return NULL;
+    }
+  }
+  cap2.release();
+  return NULL;
+}
+
 int main(int argc, char **argv)
 {
   // Start default camera
-  cv::VideoCapture cap2(3);
   cv::VideoCapture cap(0);
 
+  int i = 2;
   // cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps <<
   // endl;
 
   // Check if camera opened successfully
-  if (!cap.isOpened() || !cap2.isOpened())
-  {
-    cout << "Error opening video stream" << endl;
-    return -1;
-  }
+  // if (!cap.isOpened() || !cap2.isOpened())
+  // {
+  //   cout << "Error opening video stream" << endl;
+  //   return -1;
+  // }
 
   // Default resolutions of the frame are obtained.The default resolutions are
   // system dependent. int frame_width = cap.get(cv::CAP_PROP_FRAME_WIDTH); int
   // frame_height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-  double frame_counter;
   double fps = cap.get(CAP_PROP_FPS);
   cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps << endl;
-
+  pthread_t capture_thread1;
+  pthread_create(&capture_thread1, NULL, &capturedata_aprilgrid, &i);
   //   // Define the codec and create VideoWriter object.The output is stored in
   //   'outcpp.avi' file. VideoWriter video("outcpp.avi",
   //   cv::VideoWriter::fourcc('M','J','P','G'), 10,
   //   Size(frame_width,frame_height));
   time_t start, end;
   time(&start);
-  while (1)
+  while (!killall)
   {
 
-    Mat frame, frame2, gray2, gray;
-    
-   
+    Mat frame, gray;
+
     if (!aprilgrid.set_complete)
     {
       // cout << "cwebcam1";
@@ -536,49 +576,32 @@ int main(int argc, char **argv)
       cvtColor(frame, gray, COLOR_BGR2GRAY);
       if (frame.empty())
         break;
-      
+
       frame = aprilgrid.draw_marker(gray, frame);
       imshow("CAM0", frame);
     }
-    if (!aprilgrid2.set_complete)
-    {
 
-      // cout << "cwebcam2";
-      // Capture frame-by-frame
-      cap2 >> frame2;
-      // cv::flip(frame,frame,1);
-      cvtColor(frame2, gray2, COLOR_BGR2GRAY);
-     
-      // If the frame is empty, break immediately
-
-      if (frame2.empty())
-        break;
-      // Write the frame into the file 'outcpp.avi'
-      // cap.write(frame);
-
-      frame2 = aprilgrid2.draw_marker(gray2, frame2);
-      imshow("CAM2", frame2);
-      // Display the resulting frame
-    }
     time(&end);
 
-    
-    
-    if (aprilgrid.set_complete && aprilgrid2.set_complete)
+    if (aprilgrid.set_complete)
+    {
+      cap.release();
       break;
+    }
 
     // Press  ESC on keyboard to  exit
     char c = (char)waitKey(1);
     if (c == 27)
+    {
       break;
+      killall = true;
+    }
   }
 
-  // When everything done, release the video capture and write object
-  cap.release();
-  cap2.release();
-  //   video.release();
-
   // Closes all the frames
+
   destroyAllWindows();
+  pthread_join(capture_thread1, NULL);
+
   return 0;
 }
