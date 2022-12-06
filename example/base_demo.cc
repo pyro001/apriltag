@@ -14,7 +14,8 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
-#define APRILGRIDARRAYSIZE 30 // 36
+#include <semaphore.h>
+#define APRILGRIDARRAYSIZE 20 // 36
 #define DEBUG
 #define RESOLUTIONMOD 1
 #define CPPHTTPLIB_OPENSSL_SUPPORT
@@ -34,7 +35,7 @@ extern "C"
 #include "Src/tagStandard52h13.h"
 }
 using namespace std;
-
+sem_t thread_release, thread_synch;
 // ===================================================
 //  opencv aprilgrid extraction support structures
 //====================================================
@@ -89,7 +90,7 @@ class marker_pointcloud
 private:
   int set_id;
   std::vector<marker_bounds> instance_vector;
-  std::string filename;
+
   float squaresize = (25.55 / 1000);
   float margin = (06.8 / 1000);
   double computeReprojectionErrors(const vector<vector<cv::Point3f>> &objectPoints,
@@ -112,7 +113,9 @@ public:
   void create_detect_instance(std::vector<marker_bounds> input_vector);
   void setup_calibration(float square_size, float space_size, cv::Mat img);
   int get_set_id() { return set_id; }
+  std::string filename;
 };
+
 // ===================================================
 // fuctions in marker pointcloud class
 //====================================================
@@ -127,7 +130,7 @@ void marker_pointcloud::create_detect_instance(
   cout << "input control motion filter:" << ptmanifold.x << "\t::\t" << ptmanifold.y;
 #endif
   // TODO:  you may add filters here to determine stuff currently left blank
-  bool new_image_found = this->motion_filter(manifold);
+  bool new_image_found =  this->motion_filter(manifold);
   if (new_image_found)
   {
     this->set_id++;
@@ -173,7 +176,7 @@ bool marker_pointcloud::motion_filter(marker_bounds input)
 
   if (this->vector_detection_set.empty())
   {
-    cout << "empty vector: pass through \n";
+    // cout << "empty vector: pass through \n";
     return (true);
   }
   for (std::vector<acquisition_instance_Str>::iterator
@@ -182,13 +185,18 @@ bool marker_pointcloud::motion_filter(marker_bounds input)
   {
 
     vector<marker_bounds> detectionstub = it->vector_acq;
-
-    marker_bounds mkb = detectionstub.front();
+    for (std::vector<marker_bounds>::iterator it2 = detectionstub.begin(); it2 != detectionstub.end(); ++it2)
+    {
+      marker_bounds mkb = detectionstub.front();
+      if (mkb.id == input.id)
+      {
 #ifdef DEBUGV
-    cout << "\ncomapring id" << mkb.id << "\t::\t" << input.id << "\n";
+        cout << "\ncomapring id" << mkb.id << "\t::\t" << input.id << "\n";
 #endif
-    if (mkb == input)
-      return (false);
+        if (mkb == input)
+          return (false);
+      }
+    }
   }
   return (true);
 }
@@ -211,12 +219,12 @@ double marker_pointcloud::computeReprojectionErrors(const vector<vector<cv::Poin
 
     int n = (int)objectPoints[i].size();
 
-    // cout << err << "\nerror" << err / n << "round id" << i << "size of objective" << n << "\n";
+    cout << err * err / n << "\nerror" << err / n << "round id\t" << i << "size of objective" << n << "\n";
     // perViewErrors[i] = (float)std::sqrt(err / n);
     totalErr += (err * err / n);
     // totalPoints += n;
   }
-  cout << "total poincould size " << (int)objectPoints.size() << "\tmean error " << sqrt(totalErr/ (int)objectPoints.size()) << "\n";
+  cout << "total poincould size " << (int)objectPoints.size() << "\tmean error " << sqrt(totalErr / (int)objectPoints.size()) << "\n";
 
   return (double(sqrt(totalErr / (int)objectPoints.size())));
 }
@@ -252,31 +260,52 @@ void marker_pointcloud::setup_calibration(float square_size, float space_size, c
          it2 != detection_stub.end(); ++it2)
     {
       pt_ref.x = pt_ref.x - (this->squaresize + this->margin);
-      if (it2->id - old_id > 1)
-      {
+      // if (it2->id - old_id > 1)
+      // {
+      //   // cout << "\ndifferential on id\t" << it2->id << "::" << old_id << "::" << it2->id - old_id;
+      //   pt_ref.x = pt_ref.x - ((it2->id - (old_id)-1) * (this->margin + this->squaresize));
+      //   if (double(pt_ref.x) < 0.000001 && double(pt_ref.x) > -0.000001)
+      //   {
+      //     pt_ref.x = 0.0;
+      //   }
+
+      //   if (pt_ref.x < -0.00001 && it2->id - old_id < 6)
+      //   {
+      //     pt_ref.y = pt_ref.y + (this->margin + this->squaresize);
+      //     pt_ref.x = pt_ref.x + (this->squaresize + this->margin) * 6;
+      //   }
+      //   else if (pt_ref.x < -0.00001 && (it2->id - old_id) == 6)
+      //     {
+      //       pt_ref.y = pt_ref.y + (this->margin + this->squaresize);
+      //     }
+
+      //   // cout << "\n projected next point" << pt_ref.x << ":\t:" << pt_ref.y;
+      // }
+      if ((it2->id - old_id) > 1)
+      { // alternate route just do what you were doing for 36pts but dont record
         // cout << "\ndifferential on id\t" << it2->id << "::" << old_id << "::" << it2->id - old_id;
-        pt_ref.x = pt_ref.x - ((it2->id - (old_id)-1) * (this->margin + this->squaresize));
-        if (double(pt_ref.x) < 0.000001 && double(pt_ref.x) > -0.000001)
+        for (int i = old_id + 1; i < it2->id; i++)
         {
-          pt_ref.x = 0.0;
-        }
+          // cout << "\nget id " << i;
+          // cout << "point at" << pt_ref.x << "::\t" << pt_ref.y;
+          if (pt_ref.x <= 0)
+          {
+            // cout << "row skip" << pt_ref.x << "::\t" << pt_ref.y;
 
-        if (pt_ref.x < -0.00001 && it2->id - old_id < 6)
-        {
-          pt_ref.y = pt_ref.y + (this->margin + this->squaresize);
-          pt_ref.x = pt_ref.x + (this->squaresize + this->margin) * 6;
-        }
-        else if (pt_ref.x < -0.00001 && it2->id - old_id == 6)
-        {
-          pt_ref.y = pt_ref.y + (this->margin + this->squaresize);
-        }
+            pt_ref.y = pt_ref.y + this->margin + this->squaresize;
 
-        // cout << "\n projected next point" << pt_ref.x << ":\t:" << pt_ref.y;
+            pt_ref.x = (this->squaresize + this->margin) * 6;
+          }
+          pt_ref.x = pt_ref.x - (this->squaresize + this->margin);
+        }
+        // cout << "\n projected next point" << pt_ref.x << "::\t" << pt_ref.y;
       }
 
-      //  cout<< "\n"<<it2->id<<"for id"<<pt_ref.x<<"::"<<pt_ref.y<<"\n";
       if (pt_ref.x <= 0.00000001)
         pt_ref.x = 0;
+      // cout << "\n"
+      //      << it2->id << "for id" << pt_ref.x << "::" << pt_ref.y << "\n";
+
       image_point.push_back(cv::Point2f(it2->bound_2.x, it2->bound_2.y));
       // cout << "\n" << it2->id << "for id" << it2->bound_1.x << "::" << it2->bound_1.y << "\n";
       object_point.push_back(cv::Point3f(pt_ref.x, pt_ref.y, 0));
@@ -325,37 +354,37 @@ void marker_pointcloud::setup_calibration(float square_size, float space_size, c
   double reproj_error = computeReprojectionErrors(object_points, image_points, rvecs, tvecs, K, D);
   cout << "\nCalibration error: " << reproj_error << endl;
 
-  for (std::vector<acquisition_instance_Str>::iterator it = this->vector_detection_set.begin(); it != this->vector_detection_set.end(); ++it)
-  {
-    vector<cv::Point2f> image_point2;
-    vector<Point3f> object_point2;
+  // for (std::vector<acquisition_instance_Str>::iterator it = this->vector_detection_set.begin(); it != this->vector_detection_set.end(); ++it)
+  // {
+  //   vector<cv::Point2f> image_point2;
+  //   vector<Point3f> object_point2;
 
-    point pt_ref;
-    pt_ref.x = (this->squaresize + this->margin) * 6;
-    std::vector<marker_bounds> detection_stub = it->vector_acq;
-    for (std::vector<marker_bounds>::iterator
-             it2 = detection_stub.begin();
-         it2 != detection_stub.end(); ++it2)
-    {
-      pt_ref.x = pt_ref.x - (this->squaresize + this->margin);
-      //  cout<< "\n"<<it2->id<<"for id"<<pt_ref.x<<"::"<<pt_ref.y<<"\n";
-      if (pt_ref.x <= 0.00000001)
-        pt_ref.x = 0;
+  //   point pt_ref;
+  //   pt_ref.x = (this->squaresize + this->margin) * 6;
+  //   std::vector<marker_bounds> detection_stub = it->vector_acq;
+  //   for (std::vector<marker_bounds>::iterator
+  //            it2 = detection_stub.begin();
+  //        it2 != detection_stub.end(); ++it2)
+  //   {
+  //     pt_ref.x = pt_ref.x - (this->squaresize + this->margin);
+  //     // cout<< "\n"<<it2->id<<"for id"<<pt_ref.x<<"::"<<pt_ref.y<<"\n";
+  //     if (pt_ref.x <= 0.00000001)
+  //       pt_ref.x = 0;
 
-      image_point2.push_back(cv::Point2f(it2->centre.x, it2->bound_1.y));
-      // cout << "\n" << it2->id << "for id" << it2->bound_1.x << "::" << it2->bound_1.y << "\n";
-      object_point2.push_back(cv::Point3f(pt_ref.x, pt_ref.y, 0));
+  //     image_point2.push_back(cv::Point2f(it2->centre.x, it2->bound_1.y));
+  //     // cout << "\n" << it2->id << "for id" << it2->bound_1.x << "::" << it2->bound_1.y << "\n";
+  //     object_point2.push_back(cv::Point3f(pt_ref.x, pt_ref.y, 0));
 
-      if (pt_ref.x <= 0)
-      {
+  //     if (pt_ref.x <= 0)
+  //     {
 
-        pt_ref.y = pt_ref.y + this->margin + this->squaresize;
-        pt_ref.x = (this->squaresize + this->margin) * 6;
-      }
-    }
-    // image_points2.push_back(image_point2);
-    // object_points2.push_back(object_point2);
-  }
+  //       pt_ref.y = pt_ref.y + this->margin + this->squaresize;
+  //       pt_ref.x = (this->squaresize + this->margin) * 6;
+  //     }
+  //   }
+  //   // image_points2.push_back(image_point2);
+  //   // object_points2.push_back(object_point2);
+  // }
 
   // double reproj_error2 = cv::calibrateCamera(object_points2, image_points2, img.size(), K2, D2, rvecs2, tvecs2);
   // cout << "\n Calibration error: " << computeReprojectionErrors(object_points2, image_points2, rvecs2, tvecs2, K2, D2) << endl;
@@ -377,6 +406,7 @@ void marker_pointcloud::setup_calibration(float square_size, float space_size, c
 class opencv_demo
 {
 private:
+  string window_id;
   apriltag_family_t *tf = nullptr;
   apriltag_detector_t *td = nullptr;
   apriltag_detection_t *det = nullptr;
@@ -387,7 +417,7 @@ private:
 public:
   opencv_demo(/* args */);
   ~opencv_demo();
-  opencv_demo(int max_iterations);
+  opencv_demo(int max_iterations, string storage_file);
   Mat draw_marker(Mat input_frame, Mat Colour, opencv_demo *obj);
   bool set_complete = false;
   bool instance_complete = false;
@@ -472,16 +502,20 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour, opencv_demo *obj)
                     det->c[1] + textsize.height / 2),
               fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
     }
-
-    if (obj->instance_complete && this->detection_input.get_set_id() <= obj->detection_input.get_set_id())
+    // sem_trywait(&thread_synch);
+    if (obj->instance_complete && ((this->detection_input.get_set_id() <= obj->detection_input.get_set_id())))
     {
-      //  obj->instance_complete = false;
+      cout << "trigger condition";
+      // obj->instance_complete = false;
       this->detection_input.create_detect_instance(local_store);
       // this->instance_complete = false;
       // usleep(333333);
     }
+  
+    
     else
     {
+      // sem_post(&thread_synch);
       this->instance_complete = false;
     }
 
@@ -489,7 +523,7 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour, opencv_demo *obj)
 
     int set_num = this->detection_input.get_set_id();
 
-    if (set_num >= this->max_iter )
+    if (set_num >= this->max_iter)
     {
       this->set_complete = true;
       // cout << "\ncalibration criteria met. running calibration...";
@@ -511,18 +545,20 @@ opencv_demo::opencv_demo(/* args */)
 {
   this->max_iter = 10;
   this->tf = tag36h11_create();
-  tf->width_at_border = 8;
-  tf->total_width = max_iter;
+  this->tf->width_at_border = 8;
+  this->tf->total_width = 10;
+  marker_pointcloud detection_input;
   tf->reversed_border = false;
   this->td = apriltag_detector_create();
   apriltag_detector_add_family(td, tf);
 }
-opencv_demo::opencv_demo(int max_iterations)
+opencv_demo::opencv_demo(int max_iterations, string storage_file)
 {
+  this->detection_input.filename = storage_file;
   this->max_iter = max_iterations;
   this->tf = tag36h11_create();
   tf->width_at_border = 8;
-  tf->total_width = max_iter;
+  tf->total_width = 10;
   tf->reversed_border = false;
   this->td = apriltag_detector_create();
   apriltag_detector_add_family(td, tf);
@@ -531,23 +567,27 @@ opencv_demo::~opencv_demo() { tag36h11_destroy(tf); }
 // ===================================================
 // MAIN
 //====================================================
-#include <time.h>
+
 
 bool killall = false;
 using namespace cv;
 using namespace std;
-opencv_demo aprilgrid, aprilgrid2;
+opencv_demo aprilgrid2(10, "rootmonitor.yaml"), aprilgrid(10, "externalmonitor.yaml");
 
 void *capturedata_aprilgrid(void *input)
 {
-  int in = *(int *)input;
 
+  int in = *(int *)input;
+  sem_wait(&thread_release);
   cv::VideoCapture cap2(in);
   Mat frame2, gray2;
+  sem_post(&thread_release);
   while (!killall)
   {
+    sem_wait(&thread_release);
     if (!aprilgrid2.set_complete)
     {
+      
 
       // cout << "cwebcam2";
       // Capture frame-by-frame
@@ -573,6 +613,7 @@ void *capturedata_aprilgrid(void *input)
       cap2.release();
       return NULL;
     }
+    sem_post(&thread_release);
   }
   cap2.release();
   return NULL;
@@ -580,9 +621,8 @@ void *capturedata_aprilgrid(void *input)
 
 int main(int argc, char **argv)
 {
-  // Start default camera
-  cv::VideoCapture cap(0);
-
+  sem_init(&thread_release, 2, 2);
+  sem_init(&thread_synch, 2, 2);
   int i = 2;
   // cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps <<
   // endl;
@@ -597,19 +637,23 @@ int main(int argc, char **argv)
   // Default resolutions of the frame are obtained.The default resolutions are
   // system dependent. int frame_width = cap.get(cv::CAP_PROP_FRAME_WIDTH); int
   // frame_height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-  double fps = cap.get(CAP_PROP_FPS);
-  cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps << endl;
+  // double fps = cap.get(CAP_PROP_FPS);
+  // cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps << endl;
   pthread_t capture_thread1;
   pthread_create(&capture_thread1, NULL, &capturedata_aprilgrid, &i);
+  sem_wait(&thread_release);
+  // Start default camera
+  cv::VideoCapture cap(0);
   //   // Define the codec and create VideoWriter object.The output is stored in
   //   'outcpp.avi' file. VideoWriter video("outcpp.avi",
   //   cv::VideoWriter::fourcc('M','J','P','G'), 10,
   //   Size(frame_width,frame_height));
   time_t start, end;
+  sem_post(&thread_release);
   time(&start);
   while (!killall)
   {
-
+    sem_wait(&thread_release);
     Mat frame, gray;
 
     if (!aprilgrid.set_complete)
@@ -634,7 +678,7 @@ int main(int argc, char **argv)
       cap.release();
       break;
     }
-
+    sem_post(&thread_release);
     // Press  ESC on keyboard to  exit
     char c = (char)waitKey(1);
     if (c == 27)

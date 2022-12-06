@@ -198,7 +198,7 @@ class SliderStacker():
         # display stacking them vertically
         cv2.imshow('Sliders', img_sliders)
 if __name__ == '__main__':
-    img_input = cv2.imread('example/target.jpg')
+    img_input = cv2.imread('example/target640.jpg')
     
     cv2.namedWindow('Rendering', cv2.WINDOW_NORMAL)
     slider_shape = (1000 // 12, 1000)
@@ -214,9 +214,9 @@ if __name__ == '__main__':
     sliders.append(Slider('Sc(x)', slider_shape, -2, 2, start=1))
     sliders.append(Slider('Sc(y)', slider_shape, -2, 2, start=1))
     sliders.append(Slider('Sc(z)', slider_shape, -2, 2, start=1))
-    sliders.append(Slider('Sh(x)', slider_shape, -180, 180))
-    sliders.append(Slider('Sh(y)', slider_shape, -180, 180))
-    sliders.append(Slider('Sh(z)', slider_shape, -180, 180))
+    # sliders.append(Slider('Sh(x)', slider_shape, -180, 180))
+    # sliders.append(Slider('Sh(y)', slider_shape, -180, 180))
+    # sliders.append(Slider('Sh(z)', slider_shape, -180, 180))
     params = SliderStacker(sliders)
     
     while True:
@@ -224,9 +224,9 @@ if __name__ == '__main__':
         trans = tuple(slider_values[:3])
         rot = tuple(slider_values[3:6])
         scale = tuple(slider_values[6:9])
-        shear = tuple(slider_values[9:])
+        # shear = tuple(slider_values[9:])
         params.update()
-        img_output = transform(img_input, trans, rot, scale, shear)
+        img_output = transform(img_input, trans, rot, scale)#, shear)
         cv2.imshow('Rendering', img_output)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
