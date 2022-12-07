@@ -223,7 +223,7 @@ if __name__ == '__main__':
         slider_values = [s.value for s in params.sliders]
         trans = tuple(slider_values[:3])
         rot = tuple(slider_values[3:6])
-        scale = tuple(slider_values[6:9])
+        scale = tuple([0.4,0.5,1])
         # shear = tuple(slider_values[9:])
         params.update()
         img_output = transform(img_input, trans, rot, scale)#, shear)

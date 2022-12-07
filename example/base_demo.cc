@@ -15,10 +15,8 @@
 #include <iostream>
 #include <vector>
 #include <semaphore.h>
-#define APRILGRIDARRAYSIZE 20 // 36
-#define DEBUG
-#define RESOLUTIONMOD 1
-#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include <errno.h>
+#include <ctime>
 #include <pthread.h>
 extern "C"
 {
@@ -34,7 +32,22 @@ extern "C"
 #include "Src/tagStandard41h12.h"
 #include "Src/tagStandard52h13.h"
 }
+
+// ======================================================
+// ===================================================
+//  Static Defines 
+//====================================================
+#define APRILGRIDARRAYSIZE    20 // 36
+#define DEBUG
+#define RESOLUTIONMOD         8
+#define JITTER                1
+#define delay_inus            3333
+#define ENFORCE_SYNCH         1
+#define DUAL_CAM              1
+
+//=======================================================
 using namespace std;
+struct timespec ts;
 sem_t thread_release, thread_synch;
 // ===================================================
 //  opencv aprilgrid extraction support structures
@@ -50,7 +63,7 @@ struct point
 #ifdef DEBUGV
     cout << "\n operator overload::" << int(this->x / 10) << "\t" << int(comparator.x / 10);
 #endif
-    return (int(this->x / RESOLUTIONMOD) == int(comparator.x / RESOLUTIONMOD) || int(this->y / RESOLUTIONMOD) == int(comparator.y / RESOLUTIONMOD));
+    return ((int((this->x + JITTER) / RESOLUTIONMOD) >= int(comparator.x / RESOLUTIONMOD) && int((this->x - JITTER) / RESOLUTIONMOD) <= int(comparator.x / RESOLUTIONMOD)) || (int((this->y + JITTER) / RESOLUTIONMOD) >= int(comparator.y / RESOLUTIONMOD) && int((this->y - JITTER) / RESOLUTIONMOD) <= int(comparator.y / RESOLUTIONMOD)));
   }
 };
 
@@ -110,7 +123,7 @@ public:
   /// @return
   bool motion_filter(marker_bounds input);
   void create_acquisition_instance(acquisition_instance_Str input_vector);
-  void create_detect_instance(std::vector<marker_bounds> input_vector);
+  void create_detect_instance(std::vector<marker_bounds> input_vector, bool enforce_cap);
   void setup_calibration(float square_size, float space_size, cv::Mat img);
   int get_set_id() { return set_id; }
   std::string filename;
@@ -120,21 +133,28 @@ public:
 // fuctions in marker pointcloud class
 //====================================================
 void marker_pointcloud::create_detect_instance(
-    std::vector<marker_bounds> input_vector)
+    std::vector<marker_bounds> input_vector,bool enforce_cap)
 
 {
+  time_t t;      // t passed as argument in function time()
+  struct tm *tt; // decalring variable for localtime()
+  time(&t);      // passing argument to time()
+  tt = localtime(&t);
   this->instance_vector = input_vector;
   marker_bounds manifold = input_vector.front(); // this is sorted by ids get id 2 bound1 and pass to motion filter
+  sem_post(&thread_synch);
+  // cout << "\n"<< this->filename << "semaphore entry success result::\t" <<this->set_id<< endl;
 
-#ifdef DEBUGV
-  cout << "input control motion filter:" << ptmanifold.x << "\t::\t" << ptmanifold.y;
-#endif
   // TODO:  you may add filters here to determine stuff currently left blank
-  bool new_image_found =  this->motion_filter(manifold);
-  if (new_image_found)
+  bool new_image_found = this->motion_filter(manifold);
+  if (new_image_found || enforce_cap)
   {
     this->set_id++;
-    cout << "\n batch number" << this->set_id;
+
+    
+    cout << "\nstoring data" << this->filename << "immediate cap value::\t" << enforce_cap << "batch value::\t" << this->set_id << "\t" << asctime(tt);
+
+    // cout << "\n batch number" << this->set_id;
     acquisition_instance_Str acq;
     acq.id = set_id;
     acq.vector_acq = instance_vector;
@@ -143,7 +163,16 @@ void marker_pointcloud::create_detect_instance(
     cout << "opset" << this->instance_vector.size();
 #endif
     create_acquisition_instance(acq);
+    usleep(delay_inus);
   }
+else if(!new_image_found)
+{
+  ;
+  // cout << "\nfailed data" << this->filename << "immediate cap value::\t" << enforce_cap << "batch value::\t" << this->set_id << "\t" << asctime(tt);
+
+  // cout << "\nfailed data" << this->filename << "batch value::\t" << this->set_id +1<< "\t" << asctime(tt);
+}
+
 }
 void marker_pointcloud::create_acquisition_instance(
     acquisition_instance_Str input_vector)
@@ -219,7 +248,7 @@ double marker_pointcloud::computeReprojectionErrors(const vector<vector<cv::Poin
 
     int n = (int)objectPoints[i].size();
 
-    cout << err * err / n << "\nerror" << err / n << "round id\t" << i << "size of objective" << n << "\n";
+    // cout << err * err / n << "\nerror" << err / n << "round id\t" << i << "size of objective" << n << "\n";
     // perViewErrors[i] = (float)std::sqrt(err / n);
     totalErr += (err * err / n);
     // totalPoints += n;
@@ -394,6 +423,8 @@ void marker_pointcloud::setup_calibration(float square_size, float space_size, c
   fs << "K" << K;
   fs << "D" << D;
   fs << "Reprojection error" << reproj_error;
+  fs << "rotation" << rvecs;
+  fs << "translation" << tvecs;
   // fs << "K2 - centre" << K2;
   // fs << "D2 - centre" << D2;
   // fs << "Reprojection error - centre" << reproj_error2;
@@ -502,20 +533,31 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour, opencv_demo *obj)
                     det->c[1] + textsize.height / 2),
               fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
     }
-    // sem_trywait(&thread_synch);
-    if (obj->instance_complete && ((this->detection_input.get_set_id() <= obj->detection_input.get_set_id())))
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec = 2000;
+    int s = sem_timedwait(&thread_synch, &ts);
+    // cout << "semaphore result::\t" << s << "::" << obj->instance_complete << endl;
+    if (s != -1) //&& ((this->detection_input.get_set_id() <= obj->detection_input.get_set_id())))
     {
-      cout << "trigger condition";
-      // obj->instance_complete = false;
-      this->detection_input.create_detect_instance(local_store);
-      // this->instance_complete = false;
-      // usleep(333333);
+      // resource acquired but is the other cam fine?
+      if ((obj->instance_complete) && (this->detection_input.get_set_id() <= obj->detection_input.get_set_id()))
+      {
+
+        // obj->instance_complete = false;
+        //the idea here is that if you have lagged in data the latest input image is the correct one 
+        //bypass the motion filter if that is true.
+        this->detection_input.create_detect_instance(local_store, ((this->detection_input.get_set_id() < obj->detection_input.get_set_id())&ENFORCE_SYNCH));
+      }
+      // the other cam doesnt have enough to store aka reset resource
+      else
+      {
+        sem_post(&thread_synch);
+      }
     }
-  
-    
     else
     {
-      // sem_post(&thread_synch);
+      cout << "\n"
+           << this->detection_input.filename << "semaphore entry fail result::\t" << s << "::" << obj->instance_complete << endl;
       this->instance_complete = false;
     }
 
@@ -554,7 +596,18 @@ opencv_demo::opencv_demo(/* args */)
 }
 opencv_demo::opencv_demo(int max_iterations, string storage_file)
 {
-  this->detection_input.filename = storage_file;
+  time_t now;
+  char the_date[24];
+
+  the_date[0] = '\0';
+
+  now = time(NULL);
+
+  if (now != -1)
+  {
+    strftime(the_date, 24, "%d_%m_%Y_%T_", gmtime(&now));
+  }
+  this->detection_input.filename = std::string(the_date)+ storage_file;
   this->max_iter = max_iterations;
   this->tf = tag36h11_create();
   tf->width_at_border = 8;
@@ -568,28 +621,27 @@ opencv_demo::~opencv_demo() { tag36h11_destroy(tf); }
 // MAIN
 //====================================================
 
-
 bool killall = false;
 using namespace cv;
 using namespace std;
-opencv_demo aprilgrid2(10, "rootmonitor.yaml"), aprilgrid(10, "externalmonitor.yaml");
+opencv_demo aprilgrid(10, "rootmonitor.yaml"), aprilgrid2(10, "externalmonitor.yaml");
 
 void *capturedata_aprilgrid(void *input)
 {
 
   int in = *(int *)input;
-  sem_wait(&thread_release);
+  // sem_wait(&thread_release);
   cv::VideoCapture cap2(in);
   Mat frame2, gray2;
-  sem_post(&thread_release);
+
   while (!killall)
   {
-    sem_wait(&thread_release);
+    sem_post(&thread_release);
+    // sem_wait(&thread_release);
     if (!aprilgrid2.set_complete)
     {
-      
-
-      // cout << "cwebcam2";
+      // usleep(delay_inus);
+      // cout << "\ncwebcam2";
       // Capture frame-by-frame
 
       cap2 >> frame2;
@@ -613,7 +665,7 @@ void *capturedata_aprilgrid(void *input)
       cap2.release();
       return NULL;
     }
-    sem_post(&thread_release);
+    // sem_post(&thread_release);
   }
   cap2.release();
   return NULL;
@@ -621,7 +673,7 @@ void *capturedata_aprilgrid(void *input)
 
 int main(int argc, char **argv)
 {
-  sem_init(&thread_release, 2, 2);
+  sem_init(&thread_release, 0, 1);
   sem_init(&thread_synch, 2, 2);
   int i = 2;
   // cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps <<
@@ -641,7 +693,7 @@ int main(int argc, char **argv)
   // cout << "Frames per second using video.get(CAP_PROP_FPS) : " << fps << endl;
   pthread_t capture_thread1;
   pthread_create(&capture_thread1, NULL, &capturedata_aprilgrid, &i);
-  sem_wait(&thread_release);
+  // sem_wait(&thread_release);
   // Start default camera
   cv::VideoCapture cap(0);
   //   // Define the codec and create VideoWriter object.The output is stored in
@@ -649,7 +701,7 @@ int main(int argc, char **argv)
   //   cv::VideoWriter::fourcc('M','J','P','G'), 10,
   //   Size(frame_width,frame_height));
   time_t start, end;
-  sem_post(&thread_release);
+  // sem_post(&thread_release);
   time(&start);
   while (!killall)
   {
@@ -658,8 +710,8 @@ int main(int argc, char **argv)
 
     if (!aprilgrid.set_complete)
     {
-
-      // cout << "main";
+      // usleep(delay_inus);
+      // cout << "\nmain";
       // cout << aprilgrid2.instance_complete;
       cap >> frame;
       // cv::flip(frame,frame,1);
@@ -673,7 +725,7 @@ int main(int argc, char **argv)
 
     time(&end);
 
-    if (aprilgrid.set_complete && aprilgrid2.set_complete)
+    if (aprilgrid.set_complete && (aprilgrid2.set_complete&&DUAL_CAM))
     {
       cap.release();
       break;
