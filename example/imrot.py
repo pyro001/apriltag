@@ -203,7 +203,8 @@ class SliderStacker():
 
 
 if __name__ == '__main__':
-    img_input = cv2.imread('example/target640.jpg')
+    img_input = cv2.imread('example/target-1.png')
+    img_input= cv2.resize(img_input,(720,720))
 
     cv2.namedWindow('Rendering', cv2.WINDOW_NORMAL)
     slider_shape = (1000 // 12, 1000)
