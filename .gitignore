@@ -6,3 +6,15 @@ example/opencv_demo
 example/apriltag_demo
 build/
 
+
+.vscode/
+
+*.txt#
+
+*.txt
+
+*.mp4
+
+*.yaml
+
+example/externalcam

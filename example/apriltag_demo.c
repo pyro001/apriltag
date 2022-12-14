@@ -41,20 +41,20 @@ either expressed or implied, of the Regents of The University of Michigan.
     #include <unistd.h>
 #endif
 
-#include "apriltag.h"
-#include "tag36h11.h"
-#include "tag25h9.h"
-#include "tag16h5.h"
-#include "tagCircle21h7.h"
-#include "tagCircle49h12.h"
-#include "tagCustom48h12.h"
-#include "tagStandard41h12.h"
-#include "tagStandard52h13.h"
+#include "Src/apriltag.h"
+#include "Src/tag36h11.h"
+#include "Src/tag25h9.h"
+#include "Src/tag16h5.h"
+#include "Src/tagCircle21h7.h"
+#include "Src/tagCircle49h12.h"
+#include "Src/tagCustom48h12.h"
+#include "Src/tagStandard41h12.h"
+#include "Src/tagStandard52h13.h"
 
-#include "common/getopt.h"
-#include "common/image_u8.h"
-#include "common/pjpeg.h"
-#include "common/zarray.h"
+#include "Src/common/getopt.h"
+#include "Src/common/image_u8.h"
+#include "Src/common/pjpeg.h"
+#include "Src/common/zarray.h"
 
 #define  HAMM_HIST_MAX 10
 
