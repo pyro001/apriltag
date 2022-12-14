@@ -282,9 +282,9 @@ public:
   /// @brief
   /// @param input_vector
   void create_acquisition_instance(acquisition_instance_Str input_vector);
-  /// @brief
-  /// @param input_vector
-  /// @param enforce_cap
+  /// @brief creates a "capture of the current points of interest in the image"
+  /// @param input_vector the current point cloud to be set at the latest instance vector
+  /// @param enforce_cap  enforce the capture mechanism to activates ; dependencies with the 
   void create_detect_instance(std::vector<marker_bounds> input_vector, bool enforce_cap);
   void callibrate(float square_size, float space_size, cv::Mat img);
   // override;
@@ -343,6 +343,7 @@ void callibration_mono::create_detect_instance(
 }
 /// @brief
 /// @param input_vector
+
 void callibration_mono::create_acquisition_instance(
     acquisition_instance_Str input_vector)
 {
@@ -350,6 +351,7 @@ void callibration_mono::create_acquisition_instance(
 }
 
 /// @brief
+
 
 callibration_mono::callibration_mono()
 {
@@ -491,6 +493,7 @@ double callibration_mono::computeReprojectionErrors(const vector<vector<cv::Poin
 /// @param tvecs
 /// @param cameraMatrix
 /// @param distCoeffs
+
 void callibration_mono::recompute_geometry(
     const vector<vector<cv::Point2f>> &imagePoints,
     const vector<cv::Mat> &rvecs, const vector<cv::Mat> &tvecs,
