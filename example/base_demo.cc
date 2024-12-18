@@ -6,7 +6,6 @@
 #include <opencv4/opencv2/highgui/highgui.hpp>
 #include <opencv4/opencv2/imgproc/imgproc.hpp>
 
-
 #include <chrono>
 #include <stdio.h>
 #include <iostream>
@@ -21,6 +20,8 @@
 #include <ctime>
 #include <filesystem>
 #include <pthread.h>
+#include <fstream>
+
 extern "C"
 {
 #include "Src/apriltag.h"
@@ -40,10 +41,10 @@ extern "C"
 // ===================================================
 //  Static Defines
 //====================================================
-#define APRILGRIDARRAYSIZE 20 // 36
+#define APRILGRIDARRAYSIZE 12 // 36
 #define DEBUG
 #define RESOLUTIONMOD 10
-#define JITTER 15
+#define JITTER 30.1
 #define delay_inus 3333
 #define ENFORCE_SYNCH true
 #define DUAL_CAM true
@@ -53,6 +54,7 @@ extern "C"
 using namespace std;
 struct timespec ts;
 sem_t thread_release, thread_synch;
+
 // ===================================================
 //  opencv aprilgrid extraction support structures
 //====================================================
@@ -87,17 +89,16 @@ struct marker_bounds
   int id = 0;
   bool operator==(const marker_bounds &comparator)
   {
-    return this->bound_1 == comparator.bound_1 ||
-           bound_2 == comparator.bound_2 ||
-           bound_3 == comparator.bound_3 ||
-           bound_4 == comparator.bound_4;
+    return (this->bound_1 == comparator.bound_1 ||
+            bound_2 == comparator.bound_2 ||
+            bound_3 == comparator.bound_3 ||
+            bound_4 == comparator.bound_4);
   }
   bool compare_id(const marker_bounds &comparator)
   {
     return (this->id == comparator.id);
   }
 };
-
 
 // *|MARKER_CURSOR|*
 struct acquisition_instance_Str
@@ -116,26 +117,25 @@ using namespace cv;
 class camera_core
 {
 
-
 public:
   /// @brief
   /// @return
-  virtual std::vector<vector<cv::Point2f>> get_camera_image_pts()=0;
+  virtual std::vector<vector<cv::Point2f>> get_camera_image_pts() = 0;
   /// @brief
   /// @return
-  virtual std::vector<vector<cv::Point3f>> get_camera_object_point()=0;
+  virtual std::vector<vector<cv::Point3f>> get_camera_object_point() = 0;
   /// @brief
   /// @return
-  virtual cv::Mat get_cameraMatrix()=0;
+  virtual cv::Mat get_cameraMatrix() = 0;
   /// @brief
   /// @return
-  virtual cv::Mat get_distCoeffs()=0;
+  virtual cv::Mat get_distCoeffs() = 0;
 
-  camera_core(/* args */)= default;
-  ~camera_core()= default;
+  camera_core(/* args */) = default;
+  ~camera_core() = default;
 };
 
-class camera_model: public camera_core
+class camera_model : public camera_core
 {
 private:
   std::vector<cv::Point3f> ideal_object_point;
@@ -160,22 +160,20 @@ public:
   /// @brief
   /// @return
   cv::Mat get_distCoeffs() override;
-
+  double error;
   camera_model(vector<cv::Point3f> obj,
                std::vector<vector<cv::Point2f>> img,
                vector<cv::Mat> rot,
                vector<cv::Mat> trans,
                vector<cv::Mat> images,
                cv::Mat cameraMatrix,
-               cv::Mat distortion
+               cv::Mat distortion, double error1
 
   );
 
   camera_model(/* args */);
   ~camera_model();
 };
-
-
 
 std::vector<vector<cv::Point2f>> camera_model::get_camera_image_pts()
 {
@@ -200,7 +198,7 @@ cv::Mat camera_model::get_distCoeffs() { return (cameraMatrix); }
 camera_model::camera_model(vector<cv::Point3f> obj,
                            std::vector<vector<cv::Point2f>> img,
                            vector<cv::Mat> rot, vector<cv::Mat> trans, vector<cv::Mat> images,
-                           cv::Mat cameraMatrix, cv::Mat distortion)
+                           cv::Mat cameraMatrix, cv::Mat distortion, double error1)
 {
   this->ideal_object_point = obj;
   this->image_point = img;
@@ -209,6 +207,7 @@ camera_model::camera_model(vector<cv::Point3f> obj,
   this->image_chain = images;
   this->cameraMatrix = cameraMatrix;
   this->distCoeffs = distortion;
+  this->error = error1;
 }
 
 camera_model::camera_model(/* args */) {}
@@ -225,15 +224,15 @@ private:
   virtual double computeReprojectionErrors(const vector<vector<cv::Point3f>> &objectPoints,
                                            const vector<vector<cv::Point2f>> &imagePoints,
                                            const vector<cv::Mat> &rvecs, const vector<cv::Mat> &tvecs,
-                                           const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs)=0;
+                                           const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs) = 0;
   virtual void recompute_geometry(const vector<vector<cv::Point2f>> &imagePoints,
                                   const vector<cv::Mat> &rvecs, const vector<cv::Mat> &tvecs,
-                                  const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs)=0;
+                                  const cv::Mat &cameraMatrix, const cv::Mat &distCoeffs) = 0;
 
 public:
-  callibration_core(/* args */)=default;
-  virtual camera_model generate_camera_model_prototype() =0;
-  virtual void callibrate(float square_size, float space_size, cv::Mat img)=0;
+  callibration_core(/* args */) = default;
+  virtual camera_model generate_camera_model_prototype() = 0;
+  virtual void callibrate(float square_size, float space_size, cv::Mat img) = 0;
 
   ~callibration_core(){};
 };
@@ -241,7 +240,7 @@ public:
 // ===================================================
 //  point cloud selection
 //====================================================
-class callibration_mono : public  callibration_core
+class callibration_mono : public callibration_core
 {
 private:
   int set_id;
@@ -252,6 +251,7 @@ private:
   vector<cv::Mat> image_chain;
   cv::Mat cameraMatrix;
   cv::Mat distCoeffs;
+  double error;
   vector<cv::Mat> tvecs;
   float squaresize = (25.55 / 1000);
   float margin = (06.8 / 1000);
@@ -284,7 +284,7 @@ public:
   void create_acquisition_instance(acquisition_instance_Str input_vector);
   /// @brief creates a "capture of the current points of interest in the image"
   /// @param input_vector the current point cloud to be set at the latest instance vector
-  /// @param enforce_cap  enforce the capture mechanism to activates ; dependencies with the 
+  /// @param enforce_cap  enforce the capture mechanism to activates ; dependencies with the
   void create_detect_instance(std::vector<marker_bounds> input_vector, bool enforce_cap);
   void callibrate(float square_size, float space_size, cv::Mat img);
   // override;
@@ -352,7 +352,6 @@ void callibration_mono::create_acquisition_instance(
 
 /// @brief
 
-
 callibration_mono::callibration_mono()
 {
 
@@ -405,7 +404,7 @@ callibration_mono::callibration_mono(string file)
     }
   }
 }
-/// @brief 
+/// @brief
 callibration_mono::~callibration_mono()
 {
   this->ideal_object_point.clear();
@@ -585,7 +584,7 @@ void callibration_mono::recompute_geometry(
 /// @param space_size
 /// @param img
 void callibration_mono::callibrate(float square_size, float space_size,
-                                          cv::Mat img)
+                                   cv::Mat img)
 {
   vector<vector<Point3f>> object_points;
   vector<vector<Point2f>> image_points;
@@ -597,9 +596,13 @@ void callibration_mono::callibrate(float square_size, float space_size,
   cv::Mat D2;
   vector<Mat> rvecs, tvecs, rvecs2, tvecs2;
   int flag = 0;
+  flag |= cv::CALIB_FIX_K6;
+  flag |= cv::CALIB_FIX_K1;
+  flag |= cv::CALIB_FIX_K2;
+  flag |= cv::CALIB_FIX_K3;
   flag |= cv::CALIB_FIX_K4;
-
   flag |= cv::CALIB_FIX_K5;
+  flag = 0;
   for (std::vector<acquisition_instance_Str>::iterator
            it = this->vector_detection_set.begin();
        it != this->vector_detection_set.end(); ++it)
@@ -708,20 +711,21 @@ void callibration_mono::callibrate(float square_size, float space_size,
     // cout << "\nshapes " << object_points.size() << "\t\t" << image_points.size();
   }
   this->object_point_cloud = object_points;
-  cv::calibrateCamera(object_points, image_points, img.size(), K, D, rvecs, tvecs);
+  cv::calibrateCamera(object_points, image_points, img.size(), K, D, rvecs, tvecs, flag);
   double reproj_error = computeReprojectionErrors(object_points, image_points, rvecs, tvecs, K, D);
   cout << "\nCalibration error: " << reproj_error << endl;
   this->recompute_geometry(image_points, rvecs, tvecs, K, D);
-  for (int i = 0; i < int(this->completed_vector.size()); i++)
-  {
+  // for (int i = 0; i < int(this->completed_vector.size()); i++)
+  // {
 
-    object_points2.push_back(this->ideal_object_point);
-  }
-  cout << "object size" << this->ideal_object_point.size() << "\t total size" << object_points2.size() << endl;
-  cout << "finalised reprojection " << this->filename << this->computeReprojectionErrors(object_points2, this->completed_vector, rvecs, tvecs, K, D);
+  //   object_points2.push_back(this->ideal_object_point);
+  // }
+  // cout << "object size" << this->ideal_object_point.size() << "\t total size" << object_points2.size() << endl;
+  // cout << "finalised reprojection " << this->filename << this->computeReprojectionErrors(object_points2, this->completed_vector, rvecs, tvecs, K, D);
   this->cameraMatrix = K;
   this->tvecs = tvecs;
   this->distCoeffs = D;
+  this->error = reproj_error;
   FileStorage fs(this->filename, FileStorage::APPEND);
   fs << "square-size" << this->squaresize;
   fs << "margin" << this->margin;
@@ -737,7 +741,7 @@ void callibration_mono::callibrate(float square_size, float space_size,
   printf("Done Calibration\n");
 }
 /// @brief generate a camera object from pt cloud params in the pt cloud object
-/// @return camera_model object. 
+/// @return camera_model object.
 camera_model callibration_mono::generate_camera_model_prototype()
 {
 
@@ -751,7 +755,7 @@ camera_model callibration_mono::generate_camera_model_prototype()
 
   //              )
   camera_model temporary_cam(this->ideal_object_point, this->completed_vector, this->rvecs,
-                             this->tvecs, this->image_chain, this->cameraMatrix, this->distCoeffs);
+                             this->tvecs, this->image_chain, this->cameraMatrix, this->distCoeffs, this->error);
   return (temporary_cam);
 }
 // ===================================================
@@ -876,8 +880,9 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour, opencv_demo *obj)
     // cout << "\n semaphore result::\t" << s << "\t" << this->detection_input.filename << endl;
     if (s != -1) //&& ((this->detection_input.get_set_id() <= obj->detection_input.get_set_id())))
     {
+      // cout << s << "\tinner\t";
       // resource acquired but is the other cam fine?
-      if ((obj->instance_complete) && (this->detection_input.get_set_id() <= obj->detection_input.get_set_id()))
+      if ((obj->instance_complete) && (this->detection_input.get_set_id() <= obj->detection_input.get_set_id()) | (this->detection_input.get_set_id() < obj->detection_input.get_set_id()))
       {
 
         // obj->instance_complete = false;
@@ -888,6 +893,7 @@ Mat opencv_demo::draw_marker(Mat input_frame, Mat Colour, opencv_demo *obj)
       // the other cam doesnt have enough to store aka reset resource
       else
       {
+
         sem_post(&thread_synch);
       }
     }
@@ -974,7 +980,7 @@ void *capturedata_aprilgrid(void *input)
   int in = *(int *)input;
   // sem_wait(&thread_release);
   cv::VideoCapture cap2(in);
-  cap2.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+  cap2.set(cv::CAP_PROP_FRAME_WIDTH, 960);
 
   cap2.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
   Mat frame2, gray2;
@@ -1018,7 +1024,7 @@ void *capturedata_aprilgrid(void *input)
 
 int main(int argc, char **argv)
 {
-
+  
   chdir("/home/pyro/repos/apriltag/example/tests");
   sem_init(&thread_release, 2, 2);
   sem_init(&thread_synch, 2, 2);
@@ -1046,7 +1052,8 @@ int main(int argc, char **argv)
   // cv::VideoCaptureProperties(cap, cv::CAP_PROP_FRAME_WIDTH, 1280);
 
   // cv::VideoCaptureProperties(cap, cv::CAP_PROP_FRAME_HEIGHT, 720);
-  cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+  cap.set(cv::CAP_PROP_FRAME_WIDTH, 960);
+
 
   cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
   //   // Define the codec and create VideoWriter object.The output is stored in
@@ -1059,7 +1066,6 @@ int main(int argc, char **argv)
   while (!killall)
   {
     sem_wait(&thread_release);
-
     if (!aprilgrid.set_complete)
     {
       // usleep(delay_inus);
@@ -1108,9 +1114,17 @@ int main(int argc, char **argv)
   D1 = aprilgrid.cam.get_distCoeffs();
   D2 = aprilgrid2.cam.get_distCoeffs();
   cv::Mat perViewErrors;
+  int flag = 0;
+  flag |= cv::CALIB_FIX_K1;
+  flag |= cv::CALIB_FIX_K2;
+  flag |= cv::CALIB_FIX_K3;
+  flag |= cv::CALIB_FIX_K5;
+  flag |= cv::CALIB_FIX_K4;
+  flag |= cv::CALIB_FIX_K6;
+  flag |= cv::CALIB_FIX_INTRINSIC;
   // auto objectset2 = aprilgrid2.detection_input.object_point_cloud;
   // auto objectset1 = aprilgrid.detection_input.object_point_cloud;
-  stereoCalibrate(obj, img1, img2, K1, D1, K2, D2, frame.size(), R, T, E, F, perViewErrors);
+  double epierror = stereoCalibrate(obj, img1, img2, K1, D1, K2, D2, frame.size(), R, T, E, F, perViewErrors, 0);
   cv::FileStorage fs1("test123.yaml", cv::FileStorage::WRITE);
   fs1 << "K1" << aprilgrid2.cam.get_cameraMatrix();
   fs1 << "K2" << aprilgrid.cam.get_cameraMatrix();
@@ -1122,14 +1136,12 @@ int main(int argc, char **argv)
   fs1 << "F" << F;
   fs1 << "epipolar errors" << perViewErrors;
   cout << "attempting rectification..\n";
-  double cam1error=0, cam2error = 0;
+  double cam1error = 0, cam2error = 0;
   int iter = 0;
   int nRows = perViewErrors.rows;
 
-
   for (iter = 0; iter < nRows; iter++)
   {
-    
 
     cam1error += perViewErrors.at<double>(i, 0) * perViewErrors.at<double>(i, 0);
     cam2error += perViewErrors.at<double>(i, 1) * perViewErrors.at<double>(i, 1);
@@ -1138,14 +1150,64 @@ int main(int argc, char **argv)
   }
   cam1error = double(sqrt(cam1error / iter));
   cam2error = double(sqrt(cam2error / iter));
-  cout <<endl <<cam1error << "\t" << cam2error << "\t\n\n";
+  cout << endl
+       << cam1error << "\t" << cam2error << "\t\n\n";
   cv::Mat R1, R2, P1, P2, Q;
   stereoRectify(K1, D1, K2, D2, frame.size(), R, T, R1, R2, P1, P2, Q);
-  
+  // leftMapX, leftMapY = cv2.initUndistortRectifyMap(K1, D1, R1, P1, (width, height), cv2.CV_32FC1);
+
+  // left_rectified = cv2.remap(leftFrame, leftMapX, leftMapY, cv2.INTER_LINEAR, cv2.BORDER_CONSTANT);
+
+  // rightMapX, rightMapY = cv2.initUndistortRectifyMap(K2, D2, R2, P2, (width, height), cv2.CV_32FC1);
+
+  // right_rectified = cv2.remap(rightFrame, rightMapX, rightMapY, cv2.INTER_LINEAR, cv2.BORDER_CONSTANT);
   fs1 << "R1" << R1;
   fs1 << "R2" << R2;
   fs1 << "P1" << P1;
   fs1 << "P2" << P2;
   fs1 << "Q" << Q;
+
+  double fx1 = K1.at<double>(0, 0);
+  double fy1 = K1.at<double>(1, 1);
+  double cx1 = K1.at<double>(0, 2);
+  double cy1 = K1.at<double>(1, 2);
+  double fx2 = K2.at<double>(0, 0);
+  double fy2 = K2.at<double>(1, 1);
+  double cx2 = K2.at<double>(0, 2);
+  double cy2 = K2.at<double>(1, 2);
+  // Convert rotation vector to rotation matrix
+  cv::Mat rotVec;
+  cv::Rodrigues(R, rotVec);
+  double roll = rotVec.at<double>(0, 0);
+  double pitch = rotVec.at<double>(1, 0);
+  double yaw = rotVec.at<double>(2, 0);
+  cout << yaw << "," << pitch << "," << roll << endl;
+  double reproj_error1 = aprilgrid2.cam.error;
+  double reproj_error2 = aprilgrid.cam.error;
+  time_t now;
+  char timenow1[24];
+
+  timenow1[0] = '\0';
+
+  now = time(NULL);
+
+  if (now != -1)
+  {
+    strftime(timenow1, 24, "%d_%m_%Y_%T_", gmtime(&now));
+  }
+  std::ofstream csvFile;
+  csvFile.open("data_imgrbd.csv", std::ios::out | std::ios::app);
+  // MAX_SETS
+
+  csvFile << std::string(timenow1) << "," << MAX_SETS << "," << JITTER << "," << RESOLUTIONMOD << ",";
+  csvFile << fx1 << "," << fx2 << "," << fy1 << "," << fy2 << ",";
+  csvFile << cx1 << "," << cx2 << "," << cy1 << "," << cy2 << ",";
+  csvFile << yaw << "," << pitch << "," << roll << ",";
+  csvFile << T[0] << "," << T[1] << "," << T[2] << ",";
+  csvFile << reproj_error1 << "," << reproj_error2 << "," << epierror / MAX_SETS << "," << cam1error << "," << cam2error << "," << APRILGRIDARRAYSIZE;
+
+  csvFile << std::endl;
+  csvFile.close();
+
   return 0;
 }
